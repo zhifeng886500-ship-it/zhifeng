@@ -1,0 +1,401 @@
+import React, { useState, useEffect } from 'react';
+import { Gift, Trophy, RefreshCw, User, Cpu, AlertCircle } from 'lucide-react';
+
+// --- 卡牌與遊戲常數與設定 ---
+
+const SUITS = ['♠', '♥', '♦', '♣'];
+const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+// 模擬的「剛剛生產的聖誕節抽獎禮物」清單
+const CHRISTMAS_PRIZES = [
+  { name: "iPhone 15 Pro", icon: "📱", rarity: "SSR" },
+  { name: "PlayStation 5", icon: "🎮", rarity: "SSR" },
+  { name: "高級百貨禮券 $5000", icon: "🎫", rarity: "SR" },
+  { name: "降噪藍芽耳機", icon: "🎧", rarity: "SR" },
+  { name: "聖誕限定香氛蠟燭", icon: "🕯️", rarity: "R" },
+  { name: "精美保溫杯", icon: "🥤", rarity: "R" },
+  { name: "手工薑餅人餅乾", icon: "🍪", rarity: "N" },
+  { name: "聖誕老公公的擁抱 (空氣)", icon: "🎅", rarity: "N" },
+];
+
+// --- 輔助函式 ---
+
+// 產生一副牌（52張 + 1張鬼牌）
+const generateDeck = () => {
+  let deck = [];
+  SUITS.forEach(suit => {
+    VALUES.forEach(value => {
+      deck.push({
+        id: `${suit}-${value}`,
+        suit,
+        value,
+        isJoker: false,
+        color: (suit === '♥' || suit === '♦') ? 'red' : 'black'
+      });
+    });
+  });
+  // 加入鬼牌
+  deck.push({ id: 'JOKER', suit: '', value: 'JOKER', isJoker: true, color: 'purple' });
+  return deck.sort(() => Math.random() - 0.5); // 洗牌
+};
+
+// 移除成對的牌
+const removePairs = (hand) => {
+  const newHand = [...hand];
+  const pairsRemoved = [];
+  let hasPairs = true;
+
+  while (hasPairs) {
+    hasPairs = false;
+    const valueMap = {};
+    
+    // 紀錄每種數字的位置
+    newHand.forEach((card, index) => {
+      if (card.isJoker) return;
+      if (!valueMap[card.value]) valueMap[card.value] = [];
+      valueMap[card.value].push(index);
+    });
+
+    // 尋找對子並移除
+    for (const value in valueMap) {
+      if (valueMap[value].length >= 2) {
+        // 移除最後兩張同點數的牌
+        const idx1 = valueMap[value].pop();
+        const idx2 = valueMap[value].pop();
+        // 因為要從陣列移除，先移除 index 大的，避免影響 index 小的
+        if (idx1 > idx2) {
+            newHand.splice(idx1, 1);
+            newHand.splice(idx2, 1);
+        } else {
+            newHand.splice(idx2, 1);
+            newHand.splice(idx1, 1);
+        }
+        hasPairs = true; // 標記有變動，重新檢查
+        break; // 為了安全起見，一次迴圈只移除一對，然後重新掃描
+      }
+    }
+  }
+  return newHand;
+};
+
+// --- 主元件 ---
+
+export default function ChristmasOldMaidGame() {
+  const [gameState, setGameState] = useState('start'); // start, playing, result, prize
+  const [playerHand, setPlayerHand] = useState([]);
+  const [cpuHand, setCpuHand] = useState([]);
+  const [turn, setTurn] = useState('player'); // player, cpu
+  const [statusMessage, setStatusMessage] = useState('歡迎來到聖誕抽鬼牌！');
+  const [drawnPrize, setDrawnPrize] = useState(null);
+  const [winner, setWinner] = useState(null);
+  
+  // 動畫相關狀態
+  const [isDealing, setIsDealing] = useState(false);
+  const [selectedCardIndex, setSelectedCardIndex] = useState(null);
+
+  // 初始化遊戲
+  const startGame = () => {
+    setIsDealing(true);
+    setStatusMessage('發牌中...');
+    setGameState('playing');
+    setWinner(null);
+    setDrawnPrize(null);
+
+    setTimeout(() => {
+      const deck = generateDeck();
+      // 發牌
+      const pHand = [];
+      const cHand = [];
+      deck.forEach((card, i) => {
+        if (i % 2 === 0) pHand.push(card);
+        else cHand.push(card);
+      });
+
+      // 移除初始對子
+      const cleanPHand = removePairs(pHand);
+      const cleanCHand = removePairs(cHand);
+
+      setPlayerHand(cleanPHand);
+      setCpuHand(cleanCHand);
+      setTurn('player');
+      setIsDealing(false);
+      setStatusMessage('你的回合！請點選一張電腦的牌。');
+    }, 1000);
+  };
+
+  // 檢查勝利條件
+  useEffect(() => {
+    if (gameState !== 'playing' || isDealing) return;
+
+    if (playerHand.length === 0) {
+      endGame('player');
+    } else if (cpuHand.length === 0) {
+      endGame('cpu');
+    }
+  }, [playerHand, cpuHand, gameState, isDealing]);
+
+  const endGame = (whoWon) => {
+    setWinner(whoWon);
+    setGameState('result');
+    if (whoWon === 'player') {
+      setStatusMessage('恭喜你贏了！獲得聖誕抽獎資格！');
+    } else {
+      setStatusMessage('電腦贏了，鬼牌在你手上... 聖誕禮物沒了 Q_Q');
+    }
+  };
+
+  // 電腦回合邏輯
+  useEffect(() => {
+    if (turn === 'cpu' && gameState === 'playing' && !isDealing && winner === null) {
+      setStatusMessage('電腦思考中...');
+      const timer = setTimeout(() => {
+        cpuPlay();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [turn, gameState, isDealing, winner]);
+
+  // 玩家抽牌邏輯
+  const handleDrawCard = (cardIndex) => {
+    if (turn !== 'player' || gameState !== 'playing') return;
+    
+    // 1. 從電腦手中移除牌
+    const chosenCard = cpuHand[cardIndex];
+    const newCpuHand = cpuHand.filter((_, i) => i !== cardIndex);
+    
+    // 2. 加入玩家手牌
+    const newPlayerHand = [...playerHand, chosenCard];
+    
+    // 3. 整理對子
+    const cleanPlayerHand = removePairs(newPlayerHand);
+
+    setCpuHand(newCpuHand);
+    setPlayerHand(cleanPlayerHand);
+    
+    // 顯示訊息
+    let msg = `你抽到了 ${chosenCard.isJoker ? '鬼牌 🃏' : chosenCard.suit + chosenCard.value}`;
+    if (cleanPlayerHand.length < newPlayerHand.length) {
+      msg += '，並湊成了一對丟棄！';
+    }
+    setStatusMessage(msg);
+
+    setTurn('cpu');
+  };
+
+  // 電腦抽牌邏輯
+  const cpuPlay = () => {
+    if (playerHand.length === 0) return;
+
+    // 隨機選一張玩家的牌
+    const randomIndex = Math.floor(Math.random() * playerHand.length);
+    const chosenCard = playerHand[randomIndex];
+    
+    // 1. 從玩家手中移除
+    const newPlayerHand = playerHand.filter((_, i) => i !== randomIndex);
+
+    // 2. 加入電腦手牌
+    const newCpuHand = [...cpuHand, chosenCard];
+
+    // 3. 整理對子
+    const cleanCpuHand = removePairs(newCpuHand);
+
+    setPlayerHand(newPlayerHand);
+    setCpuHand(cleanCpuHand);
+
+    let msg = '電腦抽走了你一張牌';
+    if (cleanCpuHand.length < newCpuHand.length) {
+      msg += '，並湊成了一對丟棄。';
+    } else {
+      msg += '。';
+    }
+    
+    setStatusMessage(msg + ' 輪到你了！');
+    setTurn('player');
+  };
+
+  // 抽獎邏輯
+  const handleLuckyDraw = () => {
+    setStatusMessage('抽獎箱搖晃中...');
+    setGameState('prize');
+    
+    // 簡單的動畫延遲
+    setTimeout(() => {
+      const randomPrize = CHRISTMAS_PRIZES[Math.floor(Math.random() * CHRISTMAS_PRIZES.length)];
+      setDrawnPrize(randomPrize);
+      setStatusMessage(`恭喜獲得：${randomPrize.name}！`);
+    }, 2000);
+  };
+
+  // --- UI 元件 ---
+
+  // 卡牌背面元件
+  const CardBack = ({ onClick, disabled }) => (
+    <div 
+      onClick={!disabled ? onClick : undefined}
+      className={`
+        w-16 h-24 md:w-20 md:h-28 bg-gradient-to-br from-red-600 to-red-800 
+        rounded-lg border-2 border-white shadow-md flex items-center justify-center
+        transform transition-transform duration-200 
+        ${!disabled ? 'hover:-translate-y-2 cursor-pointer hover:shadow-xl' : ''}
+      `}
+    >
+      <div className="text-white text-2xl opacity-50">🎄</div>
+    </div>
+  );
+
+  // 卡牌正面元件
+  const CardFront = ({ card }) => (
+    <div className={`
+      w-16 h-24 md:w-20 md:h-28 bg-white rounded-lg border border-gray-300 shadow-md 
+      flex flex-col items-center justify-center select-none relative
+      ${card.isJoker ? 'bg-purple-50' : ''}
+    `}>
+      <div className={`text-lg font-bold ${card.color === 'red' ? 'text-red-600' : 'text-black'}`}>
+        {card.value}
+      </div>
+      <div className={`text-2xl ${card.color === 'red' ? 'text-red-600' : 'text-black'}`}>
+        {card.isJoker ? '🤡' : card.suit}
+      </div>
+      {card.isJoker && <span className="text-xs text-purple-600 font-bold mt-1">JOKER</span>}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-green-800 font-sans text-gray-100 flex flex-col items-center p-4">
+      {/* 標題區 */}
+      <header className="mb-6 text-center">
+        <h1 className="text-3xl md:text-4xl font-bold text-yellow-400 drop-shadow-md mb-2">
+          🎅 聖誕抽鬼牌大戰 🃏
+        </h1>
+        <div className="bg-white/20 px-4 py-2 rounded-full text-sm md:text-base backdrop-blur-sm border border-white/30">
+          {statusMessage}
+        </div>
+      </header>
+
+      {/* 遊戲區域 */}
+      {gameState === 'start' && (
+        <div className="flex flex-col items-center justify-center flex-1 space-y-8 animate-fade-in">
+          <div className="text-6xl animate-bounce">🎁</div>
+          <button 
+            onClick={startGame}
+            className="px-8 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-full shadow-lg transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2"
+          >
+            <RefreshCw size={20} />
+            開始遊戲
+          </button>
+          <p className="text-green-200 max-w-md text-center text-sm">
+            規則：經典抽鬼牌。手牌率先清空者獲勝，獲勝者可進行聖誕好禮抽獎！
+          </p>
+        </div>
+      )}
+
+      {(gameState === 'playing' || gameState === 'result') && (
+        <div className="w-full max-w-4xl flex flex-col justify-between flex-1 gap-4">
+          
+          {/* 電腦手牌區 (上方) */}
+          <div className="flex flex-col items-center bg-green-900/40 p-4 rounded-xl border border-green-700/50">
+            <div className="flex items-center gap-2 mb-2 text-green-200">
+              <Cpu size={20} />
+              <span className="font-bold">電腦的手牌 ({cpuHand.length} 張)</span>
+              {turn === 'cpu' && <span className="animate-pulse text-yellow-400 text-xs">思考中...</span>}
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {cpuHand.map((card, index) => (
+                <div key={`cpu-${index}`} className="relative -ml-6 first:ml-0 transition-all hover:z-10">
+                  <CardBack 
+                    onClick={() => handleDrawCard(index)}
+                    disabled={turn !== 'player' || gameState !== 'playing'} 
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 中央訊息/互動區 */}
+          <div className="flex justify-center items-center py-4">
+            {gameState === 'result' && winner === 'player' && (
+               <button 
+               onClick={handleLuckyDraw}
+               className="animate-pulse px-8 py-4 bg-yellow-500 hover:bg-yellow-600 text-white text-xl font-bold rounded-xl shadow-xl flex items-center gap-3"
+             >
+               <Gift size={28} />
+               開啟聖誕抽獎！
+             </button>
+            )}
+             {gameState === 'result' && winner === 'cpu' && (
+               <button 
+               onClick={startGame}
+               className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white font-bold rounded-lg shadow-lg flex items-center gap-2"
+             >
+               <RefreshCw size={20} />
+               再玩一次
+             </button>
+            )}
+          </div>
+
+          {/* 玩家手牌區 (下方) */}
+          <div className="flex flex-col items-center bg-green-900/40 p-4 rounded-xl border border-green-700/50">
+             <div className="flex items-center gap-2 mb-2 text-green-200">
+              <User size={20} />
+              <span className="font-bold">你的手牌 ({playerHand.length} 張)</span>
+              {turn === 'player' && <span className="text-yellow-400 text-xs">請點選上方電腦的牌</span>}
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {playerHand.map((card, index) => (
+                <div key={card.id} className="relative -ml-4 first:ml-0 hover:-translate-y-4 transition-transform duration-200 hover:z-10">
+                  <CardFront card={card} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* 抽獎結果畫面 */}
+      {gameState === 'prize' && (
+        <div className="flex flex-col items-center justify-center flex-1 animate-fade-in text-center">
+          {!drawnPrize ? (
+            <div className="text-6xl animate-spin mb-4">🎁</div>
+          ) : (
+            <div className="bg-white/10 backdrop-blur-md p-8 rounded-2xl border-2 border-yellow-400 shadow-2xl flex flex-col items-center transform transition-all scale-100">
+              <div className="text-yellow-300 text-xl font-bold mb-4">MERRY CHRISTMAS</div>
+              <div className="text-8xl mb-4 animate-bounce">{drawnPrize.icon}</div>
+              <h2 className="text-3xl font-bold text-white mb-2">{drawnPrize.name}</h2>
+              <span className={`px-3 py-1 rounded-full text-xs font-bold 
+                ${drawnPrize.rarity === 'SSR' ? 'bg-yellow-500 text-black' : 
+                  drawnPrize.rarity === 'SR' ? 'bg-purple-500 text-white' : 'bg-blue-500 text-white'}`}>
+                {drawnPrize.rarity} 賞
+              </span>
+              
+              <div className="mt-8 flex gap-4">
+                 <button 
+                  onClick={startGame}
+                  className="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-bold"
+                >
+                  再來一局
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* 頁尾 */}
+      <footer className="mt-6 text-green-400 text-xs">
+        Design for Christmas Event 2025
+      </footer>
+
+      {/* 簡單的 CSS 動畫定義 */}
+      <style>{`
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.5s ease-out forwards;
+        }
+      `}</style>
+    </div>
+  );
+}
